@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Thống kê</title>
+  <link rel="stylesheet" href="/static/styles.css?v={{ ASSET_VERSION }}">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Crect width='128' height='128' rx='24' fill='%232563eb'/%3E%3Ctext x='50%' y='58%' dominant-baseline='middle' text-anchor='middle' font-family='Arial' font-size='64' fill='white'%3EAI%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1>Thống kê</h1>
+      <nav>
+        <a href="/">Trang chủ</a>
+        <a href="/stats">Thống kê</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h3>Tần suất nhãn</h3>
+      {% if label_counts %}
+        <canvas id="countsChart" height="120"></canvas>
+      {% else %}
+        <p>Chưa có dữ liệu.</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h3>Dự đoán gần đây</h3>
+      <div class="recent">
+        {% for item in recent %}
+          <div class="recent-item">
+            <div class="meta">
+              <div><strong>Tệp</strong>: {{ item.filename }}</div>
+              <div><strong>Top‑1</strong>: {{ item.top1_label }} ({{ (item.top1_confidence * 100) | round(2) }}%)</div>
+              <div><strong>Mô hình</strong>: {{ item.model_name }}</div>
+              <div><strong>Thời gian</strong>: {{ item.created_at }}</div>
+            </div>
+            <ol class="bars compact">
+              {% for p in item.predictions %}
+                <li>
+                  <span class="label">{{ p.label }}</span>
+                  <span class="percent">{{ (p.prob * 100) | round(2) }}%</span>
+                  <span class="bar"><span style="width: {{ (p.prob * 100) | round(2) }}%"></span></span>
+                </li>
+              {% endfor %}
+            </ol>
+          </div>
+        {% else %}
+          <p>Chưa có dữ liệu.</p>
+        {% endfor %}
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container">
+      <p>Made with Flask + TensorFlow</p>
+    </div>
+  </footer>
+
+  {% if label_counts %}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" integrity="sha384-8lQH+8oYbVPfaFd6SX6Z0SgQZKkK1w8iuj1g0dKydY0eUpRxYB+YBq9yHtkj3C7N" crossorigin="anonymous"></script>
+  <script>
+    const labels = {{ label_counts | map(attribute=0) | list | tojson }};
+    const counts = {{ label_counts | map(attribute=1) | list | tojson }};
+    const ctx = document.getElementById('countsChart');
+    const chart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Số lần dự đoán',
+          data: counts,
+          backgroundColor: 'rgba(37, 99, 235, 0.2)',
+          borderColor: 'rgba(37, 99, 235, 1)',
+          borderWidth: 1,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { maxRotation: 45, minRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
+          y: { beginAtZero: true, precision: 0 }
+        }
+      }
+    });
+  </script>
+  {% endif %}
+</body>
+</html> 

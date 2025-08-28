@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Image Classifier</title>
+  <link rel="stylesheet" href="/static/styles.css?v={{ ASSET_VERSION }}">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Crect width='128' height='128' rx='24' fill='%232563eb'/%3E%3Ctext x='50%' y='58%' dominant-baseline='middle' text-anchor='middle' font-family='Arial' font-size='64' fill='white'%3EAI%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="brand">AI Image Classifier</h1>
+      <nav>
+        <a href="/">Trang chủ</a>
+        <a href="/stats">Thống kê</a>
+        <a href="https://keras.io/api/applications/" target="_blank" rel="noopener">Mô hình</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <h2 class="gradient-text">Phân loại ảnh nhanh chóng bằng AI</h2>
+      <p>Tải ảnh lên hoặc kéo-thả vào khung bên dưới để nhận kết quả dự đoán top‑5.</p>
+    </section>
+
+    <div class="grid-2">
+      <section class="card">
+        <h3>Tải ảnh lên</h3>
+        <form id="upload-form" action="/predict" method="post" enctype="multipart/form-data">
+          <div class="form-row">
+            <label>Chọn mô hình</label>
+            <select name="model" id="model">
+              {% set models = available_models or ['efficientnet_v2_b3','efficientnet_v2_b0','mobilenet_v2'] %}
+              {% for m in models %}
+                <option value="{{ m }}" {% if m == 'efficientnet_v2_b3' %}selected{% endif %}>{{ m }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-grid">
+            <div>
+              <label>Top‑K</label>
+              <input type="number" min="1" max="5" step="1" name="top_k" value="5">
+            </div>
+            <div>
+              <label>Ngưỡng tin cậy: <span id="threshVal">0%</span></label>
+              <input id="min_prob" name="min_prob" type="range" min="0" max="1" step="0.01" value="0">
+            </div>
+          </div>
+          <div id="drop-zone" class="drop-zone" tabindex="0" aria-label="Kéo thả ảnh vào đây">
+            <div class="dz-instructions">
+              <strong>Kéo & thả</strong> ảnh vào đây hoặc
+              <label for="image" class="link">chọn tệp</label>
+            </div>
+            <input type="file" id="image" name="image" accept="image/*" required hidden>
+            <div id="preview" class="preview"></div>
+            <div class="dz-meta">
+              <span id="file-name"></span>
+              <span id="file-size"></span>
+            </div>
+          </div>
+          <button type="submit">Phân loại</button>
+        </form>
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            <ul class="flash">
+              {% for message in messages %}
+                <li>{{ message }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        {% endwith %}
+      </section>
+
+      <aside class="card info">
+        <div class="tabs">
+          <div class="tab-buttons">
+            <button type="button" data-tab="info" class="active">Thông tin mô hình</button>
+            <button type="button" data-tab="tips">Hướng dẫn</button>
+          </div>
+          <div id="panel-info" class="tab-panel active">
+            <h3>Thông tin mô hình</h3>
+            {% set info = model_info or {} %}
+            <div id="model-info">
+              <div class="info-grid">
+                <div>
+                  <div class="info-label">Tên</div>
+                  <div class="info-value" data-field="display">{{ (info['efficientnet_v2_b3'] or {}).get('display','EfficientNetV2‑B3') if info else 'EfficientNetV2‑B3' }}</div>
+                </div>
+                <div>
+                  <div class="info-label">Kích thước vào</div>
+                  <div class="info-value" data-field="input">{{ (info['efficientnet_v2_b3'] or {}).get('input','300×300') if info else '300×300' }}</div>
+                </div>
+                <div>
+                  <div class="info-label">Số tham số</div>
+                  <div class="info-value" data-field="params">{{ (info['efficientnet_v2_b3'] or {}).get('params','14.4M') if info else '14.4M' }}</div>
+                </div>
+                <div>
+                  <div class="info-label">Top‑1 ImageNet</div>
+                  <div class="info-value" data-field="imagenet_top1">{{ (info['efficientnet_v2_b3'] or {}).get('imagenet_top1','~82–83%') if info else '~82–83%' }}</div>
+                </div>
+              </div>
+              <p class="muted" data-field="notes">{{ (info['efficientnet_v2_b3'] or {}).get('notes','Độ chính xác cao hơn; tốn tài nguyên hơn B0/MobileNetV2.') if info else 'Độ chính xác cao hơn; tốn tài nguyên hơn B0/MobileNetV2.' }}</p>
+            </div>
+          </div>
+          <div id="panel-tips" class="tab-panel">
+            <h3>Mẹo tăng độ chính xác</h3>
+            <ul>
+              <li>Dùng mô hình lớn hơn (B3) hoặc tăng kích thước ảnh đầu vào.</li>
+              <li>Ảnh rõ nét, ít nhiễu, đối tượng chiếm phần lớn khung hình.</li>
+              <li>Với domain riêng, cân nhắc fine‑tune trên dữ liệu của bạn.</li>
+            </ul>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    {% if result %}
+    <section class="card">
+      <h3>Kết quả</h3>
+      <div class="result">
+        <img id="result-img" class="preview-img" src="{{ url_for('uploaded_file', filename=result.filename) }}" alt="uploaded" onerror="this.style.display='none'"/>
+        <div class="predictions">
+          <p class="top1"><span class="badge">Top‑1</span> {{ result.top1_label }} <span class="muted">({{ result.top1_prob }}%) — Mô hình: {{ result.model }}</span></p>
+          <ol class="bars">
+            {% for p in result.predictions %}
+              <li>
+                <span class="label">{{ p.label }}</span>
+                <span class="percent">{{ p.prob }}%</span>
+                <span class="bar"><span style="width: {{ p.prob }}%"></span></span>
+              </li>
+            {% endfor %}
+          </ol>
+          <div class="actions">
+            <a class="button secondary" href="/stats">Xem thống kê</a>
+            <button type="button" id="view-large">Xem ảnh lớn</button>
+          </div>
+        </div>
+      </div>
+    </section>
+    {% endif %}
+  </main>
+
+  <div id="loading" class="loading" aria-hidden="true">
+    <div class="spinner"></div>
+    <p>Đang phân loại...</p>
+  </div>
+
+  <div id="modal" class="modal" aria-hidden="true">
+    <div class="modal-content">
+      <img id="modal-img" alt="preview-large" />
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <footer>
+    <div class="container">
+      <p>Made with Flask + TensorFlow</p>
+    </div>
+  </footer>
+
+  <script>window.__MODEL_INFO__ = {{ (model_info or {}) | tojson }};</script>
+  <script src="/static/main.js?v={{ ASSET_VERSION }}"></script>
+</body>
+</html> 
