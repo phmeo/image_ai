@@ -128,3 +128,9 @@ button .ripple, .button .ripple { position: absolute; border-radius: 50%; transf
 #toast { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 60; }
 .toast { background: #111827; border: 1px solid var(--border); color: var(--text); padding: 10px 12px; border-radius: 8px; box-shadow: 0 8px 20px rgba(0,0,0,0.25); animation: toast-in 250ms ease; }
 @keyframes toast-in { from { transform: translateY(6px); opacity: 0; } to { transform: translateY(0); opacity: 1; } } 
+
+/* Detection overlay helpers */
+.detect-wrap { position: relative; display: inline-block; }
+.detect-wrap .preview-img { display: block; max-width: 100%; height: auto; }
+.detect-wrap .overlays { position: absolute; inset: 0; pointer-events: none; }
+.detect-wrap .overlays .box { box-shadow: 0 0 0 1px rgba(0,0,0,0.25) inset; } 

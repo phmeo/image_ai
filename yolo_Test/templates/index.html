@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YOLO Detection</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="container">
+    <h1>YOLO Detection</h1>
+    <form id="detect-form">
+      <div class="field">
+        <label>File</label>
+        <input type="file" id="file" name="file" accept="image/*,video/*" required />
+      </div>
+      <div class="grid">
+        <div class="field">
+          <label>Confidence</label>
+          <input type="number" step="0.01" min="0" max="1" id="conf" name="conf" value="0.35" />
+        </div>
+        <div class="field">
+          <label>IoU</label>
+          <input type="number" step="0.01" min="0" max="1" id="iou" name="iou" value="0.45" />
+        </div>
+      </div>
+      <button type="submit" id="submit">Run Detection</button>
+      <div id="status" class="status"></div>
+    </form>
+
+    <section>
+      <h2>Result</h2>
+      <div id="result"></div>
+    </section>
+
+    <section>
+      <h2>History</h2>
+      <div id="history"></div>
+    </section>
+  </div>
+
+  <script src="/static/main.js"></script>
+</body>
+</html> 

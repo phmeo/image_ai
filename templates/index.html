@@ -21,27 +21,36 @@
 
   <main class="container">
     <section class="hero">
-      <h2 class="gradient-text">Phân loại ảnh nhanh chóng bằng AI</h2>
-      <p>Tải ảnh lên hoặc kéo-thả vào khung bên dưới để nhận kết quả dự đoán top‑5.</p>
+      <h2 class="gradient-text">Phân loại ảnh & Phát hiện vật thể</h2>
+      <p>Tải ảnh lên, chọn chế độ: Phân loại (top‑K) hoặc Phát hiện (COCO‑80) để vẽ khung quanh vật thể.</p>
     </section>
 
     <div class="grid-2">
       <section class="card">
         <h3>Tải ảnh lên</h3>
         <form id="upload-form" action="/predict" method="post" enctype="multipart/form-data">
-          <div class="form-row">
-            <label>Chọn mô hình</label>
-            <select name="model" id="model">
-              {% set models = available_models or ['efficientnet_v2_b3','efficientnet_v2_b0','mobilenet_v2'] %}
-              {% for m in models %}
-                <option value="{{ m }}" {% if m == 'efficientnet_v2_b3' %}selected{% endif %}>{{ m }}</option>
-              {% endfor %}
-            </select>
+          <div class="form-grid">
+            <div>
+              <label>Chế độ</label>
+              <select name="mode" id="mode">
+                <option value="classify">Phân loại</option>
+                <option value="detect">Phát hiện</option>
+              </select>
+            </div>
+            <div id="model-wrap">
+              <label>Chọn mô hình</label>
+              <select name="model" id="model">
+                {% set models = available_models or ['efficientnet_v2_b3','efficientnet_v2_b0','mobilenet_v2','flowers_v1'] %}
+                {% for m in models %}
+                  <option value="{{ m }}" {% if m == 'efficientnet_v2_b3' %}selected{% endif %}>{{ m }}</option>
+                {% endfor %}
+              </select>
+            </div>
           </div>
           <div class="form-grid">
             <div>
               <label>Top‑K</label>
-              <input type="number" min="1" max="5" step="1" name="top_k" value="5">
+              <input type="number" min="1" max="5" step="1" name="top_k" id="top_k" value="5">
             </div>
             <div>
               <label>Ngưỡng tin cậy: <span id="threshVal">0%</span></label>
@@ -60,7 +69,7 @@
               <span id="file-size"></span>
             </div>
           </div>
-          <button type="submit">Phân loại</button>
+          <button type="submit">Chạy</button>
         </form>
         {% with messages = get_flashed_messages() %}
           {% if messages %}
@@ -105,11 +114,11 @@
             </div>
           </div>
           <div id="panel-tips" class="tab-panel">
-            <h3>Mẹo tăng độ chính xác</h3>
+            <h3>Mẹo</h3>
             <ul>
-              <li>Dùng mô hình lớn hơn (B3) hoặc tăng kích thước ảnh đầu vào.</li>
-              <li>Ảnh rõ nét, ít nhiễu, đối tượng chiếm phần lớn khung hình.</li>
-              <li>Với domain riêng, cân nhắc fine‑tune trên dữ liệu của bạn.</li>
+              <li>Phát hiện: phù hợp cảnh có nhiều vật thể (người, xe, đồ vật...).</li>
+              <li>Phân loại: phù hợp ảnh 1 đối tượng chính (hoa, thú cưng...).</li>
+              <li>Ngưỡng tin cậy cao giảm nhiễu nhưng có thể bỏ sót.</li>
             </ul>
           </div>
         </div>
@@ -118,7 +127,7 @@
 
     {% if result %}
     <section class="card">
-      <h3>Kết quả</h3>
+      <h3>Kết quả phân loại</h3>
       <div class="result">
         <img id="result-img" class="preview-img" src="{{ url_for('uploaded_file', filename=result.filename) }}" alt="uploaded" onerror="this.style.display='none'"/>
         <div class="predictions">
@@ -132,10 +141,36 @@
               </li>
             {% endfor %}
           </ol>
-          <div class="actions">
-            <a class="button secondary" href="/stats">Xem thống kê</a>
-            <button type="button" id="view-large">Xem ảnh lớn</button>
+        </div>
+      </div>
+    </section>
+    {% endif %}
+
+    {% if detection %}
+    <section class="card">
+      <h3>Kết quả phát hiện (COCO)</h3>
+      <div class="result">
+        <div class="detect-wrap">
+          <img id="det-img" class="preview-img" src="{{ url_for('uploaded_file', filename=detection.filename) }}" alt="uploaded"/>
+          <div class="overlays" style="position:relative; margin-top:-0;">
+            {% for d in detection.detections %}
+              {% set bn = d.boxn %}
+              <div class="box" style="position:absolute; left: {{ bn[0]*100 }}%; top: {{ bn[1]*100 }}%; width: {{ (bn[2]-bn[0])*100 }}%; height: {{ (bn[3]-bn[1])*100 }}%; border: 2px solid #60a5fa; border-radius: 6px;">
+                <div class="tag" style="position:absolute; left:0; top:-22px; background: rgba(96,165,250,0.9); color:#03111f; padding: 2px 6px; border-radius: 6px; font-size: 12px;">{{ d.label }} — {{ d.score }}%</div>
+              </div>
+            {% endfor %}
           </div>
+        </div>
+        <div class="predictions">
+          <ol class="bars">
+            {% for d in detection.detections[:15] %}
+              <li>
+                <span class="label">{{ d.label }}</span>
+                <span class="percent">{{ d.score }}%
+                <span class="bar"><span style="width: {{ d.score }}%"></span></span>
+              </li>
+            {% endfor %}
+          </ol>
         </div>
       </div>
     </section>
@@ -144,7 +179,7 @@
 
   <div id="loading" class="loading" aria-hidden="true">
     <div class="spinner"></div>
-    <p>Đang phân loại...</p>
+    <p>Đang chạy...</p>
   </div>
 
   <div id="modal" class="modal" aria-hidden="true">

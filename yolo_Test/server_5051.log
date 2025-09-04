@@ -1,0 +1,30 @@
+/Users/minhquan/Documents/image_ai/.venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+WARNING ⚠️ Python>=3.10 is required, but Python==3.9.6 is currently installed 
+ * Serving Flask app 'app'
+ * Debug mode: on
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5051
+ * Running on http://10.10.30.179:5051
+[33mPress CTRL+C to quit[0m
+ * Restarting with stat
+/Users/minhquan/Documents/image_ai/.venv/lib/python3.9/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+WARNING ⚠️ Python>=3.10 is required, but Python==3.9.6 is currently installed 
+ * Debugger is active!
+ * Debugger PIN: 339-821-053
+127.0.0.1 - - [04/Sep/2025 11:53:41] "[33mGET /stats HTTP/1.1[0m" 404 -
+127.0.0.1 - - [04/Sep/2025 11:53:41] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+127.0.0.1 - - [04/Sep/2025 11:53:43] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [04/Sep/2025 11:53:43] "GET /static/styles.css HTTP/1.1" 200 -
+127.0.0.1 - - [04/Sep/2025 11:53:43] "GET /static/main.js HTTP/1.1" 200 -
+127.0.0.1 - - [04/Sep/2025 11:53:43] "GET /api/history HTTP/1.1" 200 -
+Downloading https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt to 'yolov8n.pt'...
+  0%|          | 0.00/6.25M [00:00<?, ?B/s]  2%|▏         | 128k/6.25M [00:00<00:06, 999kB/s]  6%|▌         | 384k/6.25M [00:00<00:03, 1.60MB/s] 12%|█▏        | 768k/6.25M [00:00<00:02, 2.46MB/s] 24%|██▍       | 1.50M/6.25M [00:00<00:01, 4.25MB/s] 38%|███▊      | 2.38M/6.25M [00:00<00:00, 5.83MB/s] 68%|██████▊   | 4.25M/6.25M [00:00<00:00, 9.55MB/s]100%|██████████| 6.25M/6.25M [00:00<00:00, 8.42MB/s]
+Results saved to [1m/Users/minhquan/Documents/image_ai/yolo_Test/outputs/20250904-045428-256280_neon-signs-and-billboards-along-the-crowded-and-busy-city-streets-GJAG0J/pred[0m
+127.0.0.1 - - [04/Sep/2025 11:55:50] "POST /api/detect HTTP/1.1" 200 -
+Results saved to [1m/Users/minhquan/Documents/image_ai/yolo_Test/outputs/20250904-081248-388492_neon-signs-and-billboards-along-the-crowded-and-busy-city-streets-GJAG0J/pred[0m
+127.0.0.1 - - [04/Sep/2025 15:12:48] "POST /api/detect HTTP/1.1" 200 -
+127.0.0.1 - - [04/Sep/2025 15:12:48] "GET /api/history HTTP/1.1" 200 -
+127.0.0.1 - - [04/Sep/2025 15:12:48] "GET /outputs/20250904-081248-388492_neon-signs-and-billboards-along-the-crowded-and-busy-city-streets-GJAG0J/pred/20250904-081248-388492_neon-signs-and-billboards-along-the-crowded-and-busy-city-streets-GJAG0J.jpg HTTP/1.1" 200 -
