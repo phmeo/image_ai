@@ -27,7 +27,7 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 ## Run
 
 ```bash
-export YOLO_MODEL=yolov8n.pt  # or yolov8s.pt / yolov8m.pt / yolov8l.pt / yolov8x.pt
+export YOLO_MODEL=yolo11x.pt  # or yolo11n.pt / yolo11s.pt / yolo11m.pt / yolo11l.pt / yolo11x.pt
 python app.py
 ```
 

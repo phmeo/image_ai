@@ -59,10 +59,86 @@ function renderResult(payload) {
     const video = el('video', { controls: true });
     video.src = payload.output_url;
     result.appendChild(video);
-  } else {
+  } else if (payload.output_url) {
     const img = el('img', { src: payload.output_url, alt: 'Detection result' });
     result.appendChild(img);
   }
+}
+
+function attachWebcamControls() {
+  const img = document.getElementById('webcam-stream');
+  const startBtn = document.getElementById('start-webcam');
+  const stopBtn = document.getElementById('stop-webcam');
+  const confEl = document.getElementById('cam-conf');
+  const iouEl = document.getElementById('cam-iou');
+
+  if (!img || !startBtn || !stopBtn) return;
+
+  startBtn.addEventListener('click', () => {
+    const conf = Number(confEl.value || 0.35);
+    const iou = Number(iouEl.value || 0.45);
+    const url = `/webcam?conf=${encodeURIComponent(conf)}&iou=${encodeURIComponent(iou)}&_t=${Date.now()}`;
+    img.src = url;
+  });
+
+  stopBtn.addEventListener('click', () => {
+    img.src = '';
+  });
+}
+
+function attachEmotionControls() {
+  const form = document.getElementById('emotion-form');
+  const status = document.getElementById('emotion-status');
+  const result = document.getElementById('emotion-result');
+  const submit = document.getElementById('emotion-submit');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    if (!fd.get('file')) return;
+    submit.disabled = true;
+    status.textContent = 'Analyzing emotion...';
+    try {
+      const res = await fetchJSON('/api/emotion_detect', { method: 'POST', body: fd });
+      result.innerHTML = '';
+      const info = el('div', { class: 'card' });
+      info.appendChild(el('div', { html: `<strong>Model:</strong> ${res.model} — <strong>Time:</strong> ${res.duration_ms}ms` }));
+      if (res.faces && res.faces.length) {
+        const list = el('ul');
+        res.faces.forEach((f, idx) => {
+          const li = el('li', { html: `Face ${idx + 1}: ${f.emotion} (${(f.confidence ?? 0).toFixed(2)})` });
+          list.appendChild(li);
+        });
+        info.appendChild(list);
+      }
+      result.appendChild(info);
+      if (res.output_url) {
+        const img = el('img', { src: res.output_url, alt: 'Emotion result' });
+        result.appendChild(img);
+      }
+      status.textContent = '';
+      await refreshHistory();
+    } catch (err) {
+      console.error(err);
+      status.textContent = 'Error: ' + err.message;
+    } finally {
+      submit.disabled = false;
+      form.reset();
+    }
+  });
+}
+
+function attachEmotionWebcamControls() {
+  const img = document.getElementById('emotion-webcam-stream');
+  const start = document.getElementById('start-emotion-webcam');
+  const stop = document.getElementById('stop-emotion-webcam');
+  if (!img || !start || !stop) return;
+  start.addEventListener('click', () => {
+    img.src = `/webcam_emotion?_t=${Date.now()}`;
+  });
+  stop.addEventListener('click', () => {
+    img.src = '';
+  });
 }
 
 async function main() {
@@ -90,6 +166,9 @@ async function main() {
     }
   });
 
+  attachWebcamControls();
+  attachEmotionControls();
+  attachEmotionWebcamControls();
   await refreshHistory();
 }
 

@@ -6,9 +6,11 @@ import sqlite3
 from datetime import datetime
 from typing import Dict, Any, List, Tuple
 
-from flask import Flask, request, jsonify, render_template, send_from_directory, url_for
+from flask import Flask, request, jsonify, render_template, send_from_directory, url_for, Response
 
 from detector import YOLODetector
+import cv2
+from face_emotion import FaceEmotionClassifier
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -26,7 +28,18 @@ app = Flask(
     __name__, template_folder=TEMPLATES_DIR, static_folder=STATIC_DIR
 )
 
-detector = YOLODetector(model_name=os.environ.get("YOLO_MODEL", "yolov8n.pt"))
+# Use latest Ultralytics YOLO11 by default for better precision; override via YOLO_MODEL env
+_detector_model_default = "yolo11x.pt"
+detector = YOLODetector(model_name=os.environ.get("YOLO_MODEL", _detector_model_default))
+
+# Face/emotion classifier (lazy)
+_emotion_instance = None
+
+def get_emotion() -> FaceEmotionClassifier:
+    global _emotion_instance
+    if _emotion_instance is None:
+        _emotion_instance = FaceEmotionClassifier(BASE_DIR)
+    return _emotion_instance
 
 
 # ---------- Database utilities ----------
@@ -113,6 +126,39 @@ def _allowed_file(filename: str) -> Tuple[bool, str]:
     return False, ""
 
 
+def _open_camera_prefer_avfoundation() -> cv2.VideoCapture:
+    """Try multiple backends and device indices for macOS reliability."""
+    indices = [0, 1, 2, 3]
+    backends = []
+    # Prefer AVFoundation on macOS
+    if hasattr(cv2, "CAP_AVFOUNDATION"):
+        backends.append(cv2.CAP_AVFOUNDATION)
+    # Fallbacks
+    if hasattr(cv2, "CAP_QT"):
+        backends.append(cv2.CAP_QT)
+    backends.append(cv2.CAP_ANY)
+
+    for idx in indices:
+        # Try with explicit backend first
+        for be in backends:
+            try:
+                cap = cv2.VideoCapture(idx, be)
+                if cap is not None and cap.isOpened():
+                    return cap
+                if cap is not None:
+                    cap.release()
+            except Exception:
+                continue
+        # Try default constructor
+        cap = cv2.VideoCapture(idx)
+        if cap is not None and cap.isOpened():
+            return cap
+        if cap is not None:
+            cap.release()
+    # Final fallback
+    return cv2.VideoCapture(0)
+
+
 # ---------- Routes ----------
 
 
@@ -182,6 +228,58 @@ def api_detect():
     )
 
 
+@app.post("/api/emotion_detect")
+def api_emotion_detect():
+    if "file" not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"error": "No selected file"}), 400
+    ok, _ = _allowed_file(file.filename)
+    if not ok:
+        return jsonify({"error": "Unsupported file type"}), 400
+
+    # Save upload
+    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S-%f")
+    safe_name = f"{timestamp}_{os.path.basename(file.filename)}"
+    src_path = os.path.join(UPLOADS_DIR, safe_name)
+    file.save(src_path)
+
+    # Analyze emotion (images only recommended)
+    t0 = time.time()
+    try:
+        result = get_emotion().analyze_image(src_path, OUTPUTS_DIR)
+    except Exception as e:
+        return jsonify({"error": f"Emotion analysis failed: {e}"}), 500
+    duration_ms = int((time.time() - t0) * 1000)
+
+    rel = os.path.relpath(result["output_path"], OUTPUTS_DIR)
+    classes = [f["emotion"] for f in result.get("faces", [])]
+    confs = [float(f.get("confidence", 0.0)) for f in result.get("faces", [])]
+
+    history_id = _insert_history(
+        source_filename=safe_name,
+        source_type="emotion_image",
+        output_relpath=rel.replace("\\", "/"),
+        classes=classes,
+        confs=confs,
+        model="emotion-ferplus-8.onnx",
+        duration_ms=duration_ms,
+        conf=0.0,
+        iou=0.0,
+    )
+
+    return jsonify(
+        {
+            "id": history_id,
+            "output_url": url_for("serve_output", filename=rel, _external=False),
+            "faces": result.get("faces", []),
+            "duration_ms": duration_ms,
+            "model": "emotion-ferplus-8.onnx",
+        }
+    )
+
+
 @app.get("/api/history")
 def api_history():
     with _get_conn() as conn:
@@ -238,6 +336,85 @@ def api_history_item(det_id: int):
 @app.get("/outputs/<path:filename>")
 def serve_output(filename: str):
     return send_from_directory(OUTPUTS_DIR, filename, as_attachment=False)
+
+
+@app.get("/webcam")
+def webcam_stream():
+    try:
+        conf = float(request.args.get("conf", 0.35))
+        iou = float(request.args.get("iou", 0.45))
+    except Exception:
+        conf = 0.35
+        iou = 0.45
+
+    def gen():
+        cap = _open_camera_prefer_avfoundation()
+        if not cap or not cap.isOpened():
+            img = 255 * (1 - (cv2.putText(
+                img=cv2.cvtColor((255 * (cv2.getStructuringElement(cv2.MORPH_RECT, (480, 320)))).astype('uint8'), cv2.COLOR_GRAY2BGR),
+                text='Camera not available', org=(10, 50), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                fontScale=1, color=(0, 0, 255), thickness=2
+            ) or 0))
+            ret, buf = cv2.imencode('.jpg', img)
+            frame = buf.tobytes() if ret else b''
+            yield (b"--frame\r\n"
+                   b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n")
+            return
+        try:
+            detector._ensure_loaded()
+            while True:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                try:
+                    results = detector._model.predict(frame, conf=conf, iou=iou, imgsz=640, verbose=False)
+                    plotted = results[0].plot() if results and len(results) else frame
+                except Exception:
+                    plotted = frame
+                ret, jpeg = cv2.imencode('.jpg', plotted)
+                if not ret:
+                    continue
+                yield (b"--frame\r\n"
+                       b"Content-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n")
+        finally:
+            cap.release()
+
+    return Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+@app.get("/webcam_emotion")
+def webcam_emotion_stream():
+    def gen():
+        cap = _open_camera_prefer_avfoundation()
+        if not cap or not cap.isOpened():
+            img = 255 * (1 - (cv2.putText(
+                img=cv2.cvtColor((255 * (cv2.getStructuringElement(cv2.MORPH_RECT, (480, 320)))).astype('uint8'), cv2.COLOR_GRAY2BGR),
+                text='Camera not available', org=(10, 50), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                fontScale=1, color=(0, 0, 255), thickness=2
+            ) or 0))
+            ret, buf = cv2.imencode('.jpg', img)
+            frame = buf.tobytes() if ret else b''
+            yield (b"--frame\r\n"
+                   b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n")
+            return
+        try:
+            while True:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                try:
+                    plotted, _ = get_emotion().analyze_frame(frame)
+                except Exception:
+                    plotted = frame
+                ret, jpeg = cv2.imencode('.jpg', plotted)
+                if not ret:
+                    continue
+                yield (b"--frame\r\n"
+                       b"Content-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n")
+        finally:
+            cap.release()
+
+    return Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
 @app.get("/health")

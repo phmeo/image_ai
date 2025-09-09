@@ -1,6 +1,10 @@
 Flask==3.0.3
 Werkzeug==3.0.3
-ultralytics==8.3.10
-opencv-python-headless==4.10.0.84
+ultralytics>=8.3.10
+# Use full OpenCV for camera access on macOS
+opencv-python==4.10.0.84
 Pillow==10.4.0
-numpy==1.26.4 
+numpy==1.26.4
+onnxruntime>=1.17.0
+requests>=2.31.0
+mediapipe>=0.10.14 

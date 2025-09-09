@@ -10,9 +10,13 @@ input[type="file"], input[type="number"] { width: 100%; padding: 10px 12px; back
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 button { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; background: #2b63f1; color: white; border: 0; border-radius: 8px; cursor: pointer; }
 button:disabled { opacity: 0.6; cursor: not-allowed; }
+button.secondary { background: #374151; }
 .status { margin-top: 10px; color: #9fb2c7; min-height: 1em; }
 #result img, #result video { max-width: 100%; border-radius: 8px; border: 1px solid #1f2b3f; }
 .card { background: #101827; border: 1px solid #1f2b3f; border-radius: 12px; padding: 12px; margin-bottom: 10px; }
 .card strong { color: #ffffff; }
 .card small { color: #9fb2c7; }
-.list { display: grid; gap: 10px; } 
+.list { display: grid; gap: 10px; }
+.buttons { display: flex; gap: 10px; margin: 10px 0; }
+#webcam-wrap { display: flex; justify-content: center; align-items: center; min-height: 240px; }
+#webcam-stream { max-width: 100%; border-radius: 8px; border: 1px solid #1f2b3f; } 
