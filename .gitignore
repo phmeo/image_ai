@@ -10,3 +10,6 @@ __pycache__/
 /yolo_Test/uploads/
 /yolo_Test/history.db
 /yolo_Test/server_5051.log
+
+# Top-level weights
+/*.pt
