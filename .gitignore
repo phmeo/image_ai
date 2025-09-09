@@ -1,1 +1,12 @@
 .venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# yolo_Test local artifacts
+/yolo_Test/models/
+/yolo_Test/outputs/
+/yolo_Test/uploads/
+/yolo_Test/history.db
+/yolo_Test/server_5051.log
