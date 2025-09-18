@@ -18,6 +18,21 @@ function el(tag, attrs = {}, children = []) {
   return e;
 }
 
+function getSavedDeviceIndex() {
+  const v = localStorage.getItem('cameraDeviceIndex');
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 1; // default to 1
+}
+
+function setSavedDeviceIndex(n) {
+  try { localStorage.setItem('cameraDeviceIndex', String(n)); } catch {}
+}
+
+function setFallbackFormsDevice(n) {
+  document.querySelectorAll('form[action="/webcam"] input[name="device"]').forEach((inp) => { inp.value = String(n); });
+  document.querySelectorAll('form[action="/webcam_emotion"] input[name="device"]').forEach((inp) => { inp.value = String(n); });
+}
+
 async function refreshHistory() {
   const list = document.getElementById('history');
   list.innerHTML = 'Loading...';
@@ -71,14 +86,45 @@ function attachWebcamControls() {
   const stopBtn = document.getElementById('stop-webcam');
   const confEl = document.getElementById('cam-conf');
   const iouEl = document.getElementById('cam-iou');
+  const devEl = document.getElementById('cam-device');
+  const status = document.getElementById('status');
 
   if (!img || !startBtn || !stopBtn) return;
 
-  startBtn.addEventListener('click', () => {
+  // Initialize device from saved value
+  const savedDev = getSavedDeviceIndex();
+  if (devEl) devEl.value = String(savedDev);
+  setFallbackFormsDevice(savedDev);
+
+  devEl?.addEventListener('change', () => {
+    const dev = Number(devEl.value || savedDev);
+    setSavedDeviceIndex(dev);
+    setFallbackFormsDevice(dev);
+  });
+
+  startBtn.addEventListener('click', async () => {
     const conf = Number(confEl.value || 0.35);
     const iou = Number(iouEl.value || 0.45);
-    const url = `/webcam?conf=${encodeURIComponent(conf)}&iou=${encodeURIComponent(iou)}&_t=${Date.now()}`;
-    img.src = url;
+    const dev = Number(devEl.value || savedDev);
+    setSavedDeviceIndex(dev);
+    setFallbackFormsDevice(dev);
+    const streamUrl = `/webcam?conf=${encodeURIComponent(conf)}&iou=${encodeURIComponent(iou)}&device=${encodeURIComponent(dev)}&_t=${Date.now()}`;
+    const snapUrl = `/snapshot?device=${encodeURIComponent(dev)}&_t=${Date.now()}`;
+
+    status.textContent = `Connecting to camera ${dev}...`;
+    try {
+      img.src = snapUrl;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      img.onerror = () => {
+        status.textContent = `Stream failed. Try device ${dev === 0 ? 1 : 0} or open ${streamUrl} in a new tab.`;
+      };
+      img.onload = () => {
+        status.textContent = '';
+      };
+      img.src = streamUrl;
+    } catch (e) {
+      status.textContent = `Error: ${e.message}`;
+    }
   });
 
   stopBtn.addEventListener('click', () => {
@@ -91,11 +137,14 @@ function attachEmotionControls() {
   const status = document.getElementById('emotion-status');
   const result = document.getElementById('emotion-result');
   const submit = document.getElementById('emotion-submit');
+  const engineSel = document.getElementById('emotion-engine');
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
     if (!fd.get('file')) return;
+    const engine = (engineSel?.value || 'auto');
+    fd.append('engine', engine);
     submit.disabled = true;
     status.textContent = 'Analyzing emotion...';
     try {
@@ -132,9 +181,36 @@ function attachEmotionWebcamControls() {
   const img = document.getElementById('emotion-webcam-stream');
   const start = document.getElementById('start-emotion-webcam');
   const stop = document.getElementById('stop-emotion-webcam');
+  const engineSel = document.getElementById('emotion-webcam-engine');
+  const devEl = document.getElementById('emotion-cam-device');
+  const emoStatus = document.getElementById('emotion-status');
   if (!img || !start || !stop) return;
+
+  // Initialize device from saved value
+  const savedDev = getSavedDeviceIndex();
+  if (devEl) devEl.value = String(savedDev);
+  setFallbackFormsDevice(savedDev);
+
+  devEl?.addEventListener('change', () => {
+    const dev = Number(devEl.value || savedDev);
+    setSavedDeviceIndex(dev);
+    setFallbackFormsDevice(dev);
+  });
+
   start.addEventListener('click', () => {
-    img.src = `/webcam_emotion?_t=${Date.now()}`;
+    const engine = (engineSel?.value || 'auto');
+    const dev = Number(devEl.value || savedDev);
+    setSavedDeviceIndex(dev);
+    setFallbackFormsDevice(dev);
+    const url = `/webcam_emotion?engine=${encodeURIComponent(engine)}&device=${encodeURIComponent(dev)}&_t=${Date.now()}`;
+    emoStatus.textContent = `Connecting to camera ${dev} (${engine})...`;
+    img.onerror = () => {
+      emoStatus.textContent = `Emotion stream failed. Try device ${dev === 0 ? 1 : 0}.`;
+    };
+    img.onload = () => {
+      emoStatus.textContent = '';
+    };
+    img.src = url;
   });
   stop.addEventListener('click', () => {
     img.src = '';

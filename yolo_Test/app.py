@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Tuple
 
 from flask import Flask, request, jsonify, render_template, send_from_directory, url_for, Response
+import time as _time
 
 from detector import YOLODetector
 import cv2
@@ -126,20 +127,20 @@ def _allowed_file(filename: str) -> Tuple[bool, str]:
     return False, ""
 
 
-def _open_camera_prefer_avfoundation() -> cv2.VideoCapture:
+def _open_camera_prefer_avfoundation(preferred_index: int = -1) -> cv2.VideoCapture:
     """Try multiple backends and device indices for macOS reliability."""
-    indices = [0, 1, 2, 3]
+    indices = [preferred_index] if preferred_index >= 0 else []
+    for idx in [0, 1, 2, 3]:
+        if idx not in indices:
+            indices.append(idx)
     backends = []
-    # Prefer AVFoundation on macOS
     if hasattr(cv2, "CAP_AVFOUNDATION"):
         backends.append(cv2.CAP_AVFOUNDATION)
-    # Fallbacks
     if hasattr(cv2, "CAP_QT"):
         backends.append(cv2.CAP_QT)
     backends.append(cv2.CAP_ANY)
 
     for idx in indices:
-        # Try with explicit backend first
         for be in backends:
             try:
                 cap = cv2.VideoCapture(idx, be)
@@ -149,13 +150,11 @@ def _open_camera_prefer_avfoundation() -> cv2.VideoCapture:
                     cap.release()
             except Exception:
                 continue
-        # Try default constructor
         cap = cv2.VideoCapture(idx)
         if cap is not None and cap.isOpened():
             return cap
         if cap is not None:
             cap.release()
-    # Final fallback
     return cv2.VideoCapture(0)
 
 
@@ -239,6 +238,8 @@ def api_emotion_detect():
     if not ok:
         return jsonify({"error": "Unsupported file type"}), 400
 
+    engine = (request.form.get("engine") or "auto").lower()
+
     # Save upload
     timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S-%f")
     safe_name = f"{timestamp}_{os.path.basename(file.filename)}"
@@ -248,7 +249,7 @@ def api_emotion_detect():
     # Analyze emotion (images only recommended)
     t0 = time.time()
     try:
-        result = get_emotion().analyze_image(src_path, OUTPUTS_DIR)
+        result = get_emotion().analyze_image(src_path, OUTPUTS_DIR, engine=engine)
     except Exception as e:
         return jsonify({"error": f"Emotion analysis failed: {e}"}), 500
     duration_ms = int((time.time() - t0) * 1000)
@@ -259,11 +260,11 @@ def api_emotion_detect():
 
     history_id = _insert_history(
         source_filename=safe_name,
-        source_type="emotion_image",
+        source_type=f"emotion_image:{engine}",
         output_relpath=rel.replace("\\", "/"),
         classes=classes,
         confs=confs,
-        model="emotion-ferplus-8.onnx",
+        model=f"emotion:{engine}",
         duration_ms=duration_ms,
         conf=0.0,
         iou=0.0,
@@ -275,7 +276,7 @@ def api_emotion_detect():
             "output_url": url_for("serve_output", filename=rel, _external=False),
             "faces": result.get("faces", []),
             "duration_ms": duration_ms,
-            "model": "emotion-ferplus-8.onnx",
+            "model": f"emotion:{engine}",
         }
     )
 
@@ -346,9 +347,19 @@ def webcam_stream():
     except Exception:
         conf = 0.35
         iou = 0.45
+    try:
+        device = int(request.args.get("device", -1))
+    except Exception:
+        device = -1
 
     def gen():
-        cap = _open_camera_prefer_avfoundation()
+        cap = _open_camera_prefer_avfoundation(device)
+        try:
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_FPS, 20)
+        except Exception:
+            pass
         if not cap or not cap.isOpened():
             img = 255 * (1 - (cv2.putText(
                 img=cv2.cvtColor((255 * (cv2.getStructuringElement(cv2.MORPH_RECT, (480, 320)))).astype('uint8'), cv2.COLOR_GRAY2BGR),
@@ -358,14 +369,20 @@ def webcam_stream():
             ret, buf = cv2.imencode('.jpg', img)
             frame = buf.tobytes() if ret else b''
             yield (b"--frame\r\n"
-                   b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n")
+                   b"Content-Type: image/jpeg\r\n"
+                   b"Cache-Control: no-store\r\n\r\n" + frame + b"\r\n")
             return
         try:
             detector._ensure_loaded()
+            last = 0.0
             while True:
                 ok, frame = cap.read()
                 if not ok:
                     break
+                now = _time.time()
+                if now - last < 0.045:
+                    continue
+                last = now
                 try:
                     results = detector._model.predict(frame, conf=conf, iou=iou, imgsz=640, verbose=False)
                     plotted = results[0].plot() if results and len(results) else frame
@@ -375,17 +392,31 @@ def webcam_stream():
                 if not ret:
                     continue
                 yield (b"--frame\r\n"
-                       b"Content-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n")
+                       b"Content-Type: image/jpeg\r\n"
+                       b"Cache-Control: no-store\r\n\r\n" + jpeg.tobytes() + b"\r\n")
         finally:
             cap.release()
 
-    return Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    resp = Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    return resp
 
 
 @app.get("/webcam_emotion")
 def webcam_emotion_stream():
+    engine = (request.args.get("engine") or "auto").lower()
+    try:
+        device = int(request.args.get("device", -1))
+    except Exception:
+        device = -1
     def gen():
-        cap = _open_camera_prefer_avfoundation()
+        cap = _open_camera_prefer_avfoundation(device)
+        try:
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_FPS, 20)
+        except Exception:
+            pass
         if not cap or not cap.isOpened():
             img = 255 * (1 - (cv2.putText(
                 img=cv2.cvtColor((255 * (cv2.getStructuringElement(cv2.MORPH_RECT, (480, 320)))).astype('uint8'), cv2.COLOR_GRAY2BGR),
@@ -395,26 +426,88 @@ def webcam_emotion_stream():
             ret, buf = cv2.imencode('.jpg', img)
             frame = buf.tobytes() if ret else b''
             yield (b"--frame\r\n"
-                   b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n")
+                   b"Content-Type: image/jpeg\r\n"
+                   b"Cache-Control: no-store\r\n\r\n" + frame + b"\r\n")
             return
         try:
+            last = 0.0
             while True:
                 ok, frame = cap.read()
                 if not ok:
                     break
+                now = _time.time()
+                if now - last < 0.045:
+                    continue
+                last = now
                 try:
-                    plotted, _ = get_emotion().analyze_frame(frame)
+                    plotted, _ = get_emotion().analyze_frame(frame, engine=engine)
                 except Exception:
                     plotted = frame
                 ret, jpeg = cv2.imencode('.jpg', plotted)
                 if not ret:
                     continue
                 yield (b"--frame\r\n"
-                       b"Content-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n")
+                       b"Content-Type: image/jpeg\r\n"
+                       b"Cache-Control: no-store\r\n\r\n" + jpeg.tobytes() + b"\r\n")
         finally:
             cap.release()
 
-    return Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    resp = Response(gen(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    return resp
+
+# Diagnostics: test camera indices/backends
+@app.get("/debug/cam")
+def debug_cam():
+    results = []
+    backends = []
+    if hasattr(cv2, "CAP_AVFOUNDATION"):
+        backends.append(("AVFOUNDATION", cv2.CAP_AVFOUNDATION))
+    if hasattr(cv2, "CAP_QT"):
+        backends.append(("QT", cv2.CAP_QT))
+    backends.append(("ANY", cv2.CAP_ANY))
+    for idx in [0, 1, 2, 3]:
+        row = {"index": idx}
+        for name, be in backends:
+            try:
+                cap = cv2.VideoCapture(idx, be)
+                ok = bool(cap and cap.isOpened())
+                row[name] = ok
+                if cap:
+                    cap.release()
+            except Exception:
+                row[name] = False
+        results.append(row)
+    return jsonify({"devices": results})
+
+
+@app.get("/snapshot")
+def snapshot():
+    try:
+        device = int(request.args.get("device", 0))
+    except Exception:
+        device = 0
+    cap = _open_camera_prefer_avfoundation(device)
+    try:
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    except Exception:
+        pass
+    ok, frame = cap.read() if cap and cap.isOpened() else (False, None)
+    tries = 0
+    while not ok and tries < 5 and cap:
+        tries += 1
+        ok, frame = cap.read()
+    if cap:
+        cap.release()
+    if not ok or frame is None:
+        return jsonify({"error": f"Failed to read frame from device {device}"}), 500
+    ret, jpeg = cv2.imencode('.jpg', frame)
+    if not ret:
+        return jsonify({"error": "Encode failed"}), 500
+    resp = Response(jpeg.tobytes(), mimetype='image/jpeg')
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
 
 
 @app.get("/health")

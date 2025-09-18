@@ -2,7 +2,7 @@ import os
 import io
 import time
 from dataclasses import dataclass
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
 
 import cv2
 import numpy as np
@@ -19,6 +19,12 @@ try:
 	import mediapipe as mp  # type: ignore
 except Exception:  # pragma: no cover
 	mp = None
+
+# Optional FER library (7 emotions); heavy deps, so optional
+try:
+	from fer import FER  # type: ignore
+except Exception:  # pragma: no cover
+	FER = None
 
 
 EMOTION_LABELS = [
@@ -69,6 +75,14 @@ class FaceEmotionClassifier:
 				)
 			except Exception:
 				self._mp_facemesh = None
+
+		# Optional FER engine
+		self._fer = None
+		if FER is not None:
+			try:
+				self._fer = FER(mtcnn=False)  # use OpenCV face detection to avoid heavy deps
+			except Exception:
+				self._fer = None
 
 		# Emotion model (ONNX FER+)
 		self._use_onnx = False
@@ -205,45 +219,97 @@ class FaceEmotionClassifier:
 			return "anger", min(0.85, angry_proxy)
 		return "neutral", 0.6
 
-	def analyze_frame(self, frame_bgr: np.ndarray) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
-		h, w = frame_bgr.shape[:2]
-		results: List[Dict[str, Any]] = []
+	def _analyze_with_fer(self, frame_bgr: np.ndarray) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
+		if self._fer is None:
+			raise RuntimeError("FER engine not available")
+		res = self._fer.detect_emotions(frame_bgr)
 		annotated = frame_bgr.copy()
+		items: List[Dict[str, Any]] = []
+		for it in res:
+			x, y, w, h = it.get('box', [0, 0, 0, 0])
+			emo: Dict[str, float] = it.get('emotions', {})
+			if not emo:
+				continue
+			label = max(emo, key=emo.get)
+			conf = float(emo[label])
+			cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 255, 0), 2)
+			cv2.putText(annotated, f"{label} {conf:.2f}", (x, max(0, y - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+			items.append({
+				"box": {"x": x, "y": y, "w": w, "h": h},
+				"emotion": label,
+				"confidence": conf,
+				"probs": [],
+			})
+		return annotated, items
 
-		# Prefer MediaPipe FaceMesh if available for richer emotions
-		if self._mp_facemesh is not None:
-			try:
-				rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-				res = self._mp_facemesh.process(rgb)
-				if res.multi_face_landmarks:
-					for fl in res.multi_face_landmarks:
-						pts = [(lm.x * w, lm.y * h) for lm in fl.landmark]
-						# Bounding box
-						xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
-						x0, y0, x1, y1 = int(max(0, min(xs))), int(max(0, min(ys))), int(min(w, max(xs))), int(min(h, max(ys)))
-						label, conf = self._heuristic_emotion_from_landmarks(pts)
-						cv2.rectangle(annotated, (x0, y0), (x1, y1), (0, 255, 0), 2)
-						cv2.putText(annotated, f"{label} {conf:.2f}", (x0, max(0, y0 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-						results.append({
-							"box": {"x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0},
-							"emotion": label,
-							"confidence": float(conf),
-							"probs": [],
-						})
-					return annotated, results
-			except Exception:
-				pass
+	def analyze_frame(self, frame_bgr: np.ndarray, engine: Optional[str] = None) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
+		engine = (engine or "auto").lower()
+		# Engine priority
+		if engine == "fer":
+			return self._analyze_with_fer(frame_bgr)
+		if engine == "onnx":
+			# Use ONNX per-face
+			return self._analyze_haar_with("onnx", frame_bgr)
+		if engine == "mp":
+			out = self._analyze_with_mediapipe(frame_bgr)
+			if out is not None:
+				return out
+			return self._analyze_haar_with("fallback", frame_bgr)
+		if engine == "smile":
+			return self._analyze_haar_with("fallback", frame_bgr)
+		# auto: prefer ONNX -> FER -> MediaPipe -> fallback
+		if self._use_onnx:
+			return self._analyze_haar_with("onnx", frame_bgr)
+		if self._fer is not None:
+			return self._analyze_with_fer(frame_bgr)
+		mp_out = self._analyze_with_mediapipe(frame_bgr)
+		if mp_out is not None:
+			return mp_out
+		return self._analyze_haar_with("fallback", frame_bgr)
 
-		# Fallback to Haar + smile/neutral or ONNX if configured
+	def _analyze_with_mediapipe(self, frame_bgr: np.ndarray) -> Optional[Tuple[np.ndarray, List[Dict[str, Any]]]]:
+		if self._mp_facemesh is None:
+			return None
+		try:
+			h, w = frame_bgr.shape[:2]
+			results: List[Dict[str, Any]] = []
+			annotated = frame_bgr.copy()
+			rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+			res = self._mp_facemesh.process(rgb)
+			if not res.multi_face_landmarks:
+				return None
+			for fl in res.multi_face_landmarks:
+				pts = [(lm.x * w, lm.y * h) for lm in fl.landmark]
+				xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
+				x0, y0, x1, y1 = int(max(0, min(xs))), int(max(0, min(ys))), int(min(w, max(xs))), int(min(h, max(ys)))
+				label, conf = self._heuristic_emotion_from_landmarks(pts)
+				cv2.rectangle(annotated, (x0, y0), (x1, y1), (0, 255, 0), 2)
+				cv2.putText(annotated, f"{label} {conf:.2f}", (x0, max(0, y0 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+				results.append({
+					"box": {"x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0},
+					"emotion": label,
+					"confidence": float(conf),
+					"probs": [],
+				})
+			return annotated, results
+		except Exception:
+			return None
+
+	def _analyze_haar_with(self, mode: str, frame_bgr: np.ndarray) -> Tuple[np.ndarray, List[Dict[str, Any]]]:
 		gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
 		faces = self._detect_faces(gray)
+		results: List[Dict[str, Any]] = []
+		annotated = frame_bgr.copy()
 		for fb in faces:
 			x0, y0, x1, y1 = fb.x, fb.y, fb.x + fb.w, fb.y + fb.h
 			face_roi = frame_bgr[y0:y1, x0:x1]
 			if face_roi.size == 0:
 				continue
 			try:
-				label, conf, probs = self._infer_emotion(face_roi)
+				if mode == "onnx":
+					label, conf, probs = self._infer_emotion(face_roi)
+				else:
+					label, conf, probs = self._infer_emotion_fallback(face_roi)
 			except Exception:
 				label, conf, probs = "unknown", 0.0, []
 			cv2.rectangle(annotated, (x0, y0), (x1, y1), (0, 255, 0), 2)
@@ -258,11 +324,11 @@ class FaceEmotionClassifier:
 			)
 		return annotated, results
 
-	def analyze_image(self, image_path: str, outputs_root: str) -> Dict[str, Any]:
+	def analyze_image(self, image_path: str, outputs_root: str, engine: Optional[str] = None) -> Dict[str, Any]:
 		img = cv2.imread(image_path)
 		if img is None:
 			raise RuntimeError("Failed to read image for emotion analysis")
-		annotated, results = self.analyze_frame(img)
+		annotated, results = self.analyze_frame(img, engine=engine)
 
 		run_name = os.path.splitext(os.path.basename(image_path))[0] + "_emotion"
 		save_project = os.path.join(outputs_root, run_name)

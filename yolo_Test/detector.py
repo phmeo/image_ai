@@ -40,7 +40,7 @@ class YOLODetector:
             source=source_path,
             conf=conf,
             iou=iou,
-            imgsz=640,
+            imgsz=1280,
             save=True,
             project=save_project,
             name="pred",
